@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="mihomo-tproxy_fixed">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/mihomo-tproxy_fixed.zip!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
