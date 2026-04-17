@@ -1,4 +1,3 @@
-<!-- [KANO_PLUGIN_START] 猫猫_TProxy_1.1.js -->
 //<script>
 (() => {
   const checkAdvanceFunc = async () => {
@@ -100,229 +99,6 @@
       createToast(`上传失败!`, 'red');
       return false;
     }
-  };
-
-  const FIXED_CK_CFG_SH = String.raw`#!/system/bin/sh
-
-ckcfg() {
-local first_line=$(head -n '1' "$CLASH_CONFIG")
-local second_line=$(sed -n '2p' "$CLASH_CONFIG")
-if [ -z "$first_line" ] || [ ! -f "$CLASH_CONFIG" ] ; then
-    echo "空文件, 插件已停止运行"
-    exit 0
-elif [ "$(echo -n "$first_line" |grep -o 'WIP'|head -n 1)" = "WIP" ]; then
-    echo "没点击过编辑配置(WIP), 插件拒绝启动!!!"
-    exit 3
-fi
-
-if [ "$(grep -c '^cmfa-plugin:$' "$CLASH_CONFIG")" -gt 1 ]; then
-    echo "侦测到重复的cmfa-plugin片段, 尝试修复中..."
-    awk '
-    /^cmfa-plugin:$/ {
-        count++
-        if (count > 1) {
-            skip=1
-            next
-        }
-    }
-    skip == 1 {
-        if ($0 ~ /^  /) {
-            next
-        }
-        skip=0
-    }
-    { print }
-    ' "$CLASH_CONFIG" > "${CLASH_CONFIG}.tmp" && mv "${CLASH_CONFIG}.tmp" "$CLASH_CONFIG"
-fi
-
-case "$first_line" in
-http://*|https://*)
-read_only="true"
-;;
-Base64|vmess|proxies*)
-read_only="true"
-;;
-esac
-
-if $yq_path e '.cmfa-plugin' "$CLASH_CONFIG" >/dev/null 2>&1 && \
-   [ "$($yq_path e '.cmfa-plugin | type' "$CLASH_CONFIG")" = "!!map" ]; then
-
-    local keys=$($yq_path e '.cmfa-plugin | keys | join(" ")' "$CLASH_CONFIG")
-
-    for key in $keys; do
-        local value=$($yq_path e ".cmfa-plugin.$key" "$CLASH_CONFIG")
-        eval "$key=$value"
-    done
-elif [ "$read_only" = "true" ] || [ -z "$second_line" ]; then
-    return 1
-else
-    delect_key ".cmfa-plugin" "$CLASH_CONFIG" >/dev/null 2>&1;
-    cat >> "$CLASH_CONFIG" << EOF
-cmfa-plugin:
-  mode: tproxy
-  dashboard: zashboard
-  mosdns_enable: false
-EOF
-fi
-
-local yaml_sha256=$(sha256sum $CLASH_CONFIG |awk '{print $1}')
-local fast_sha256=$(cat $TOOLSDIR/fast_sha256)
-if [ "$yaml_sha256" = "$fast_sha256" ]; then
-  read_only="fast"
-fi
-}
-
-ckdns_null() {
-local first_line=$(head -n '1' "$CLASH_CONFIG")
-local broken_dns_line='^dns: {enable: true, enhanced-mode: normal, nameserver: \[,]}$'
-local broken_sniffer_line='^sniffer: {enable: true, parse-pure-ip: true, sniff: {HTTP: {ports: \[80, 443, 8080-8880], override-destination: true}, TLS: {ports: \[443, 853, 8443]}, QUIC: {ports: \[443, 853, 8443]}}}$'
-local need_rebuild_dns="false"
-if [ -z "$first_line" ] || [ ! -f "$CLASH_CONFIG" ] ; then
-    return 1
-elif [ "$read_only" = "true" ]; then
-    return 1
-fi
-if grep -q "$broken_dns_line" "$CLASH_CONFIG"; then
-   echo "侦测到损坏的DNS片段, 尝试修复中..."
-   sed -i "/$broken_dns_line/d" "$CLASH_CONFIG"
-   sed -i "/$broken_sniffer_line/d" "$CLASH_CONFIG"
-   need_rebuild_dns="true"
-fi
-if $yq_path e '.dns' "$CLASH_CONFIG" >/dev/null 2>&1 && \
-   [ "$($yq_path e '.dns | type' "$CLASH_CONFIG")" = "!!null" ] || \
-   [ "$need_rebuild_dns" = "true" ]; then
-   echo "侦测到DNS配置缺失, 尝试补齐中..."
-   delect_key ".dns" "$CLASH_CONFIG" >/dev/null 2>&1;
-   delect_key ".sniffer" "$CLASH_CONFIG" >/dev/null 2>&1;
-   local DNS1=$(getprop vendor.net.sipa_eth0.dns1)
-   local DNS2=$(getprop vendor.net.sipa_eth0.dns2)
-   [ -z "$DNS1" ] && DNS1=$(getprop net.dns1)
-   [ -z "$DNS2" ] && DNS2=$(getprop net.dns2)
-   [ -z "$DNS1" ] && DNS1="223.5.5.5"
-   [ -z "$DNS2" ] && DNS2="119.29.29.29"
-
-   local dns_mode="dns: {enable: true, enhanced-mode: normal, nameserver: [\"$DNS1\", \"$DNS2\"]}"
-   local sniffer_mode="sniffer: {enable: true, parse-pure-ip: true, sniff: {HTTP: {ports: [80, 443, 8080-8880], override-destination: true}, TLS: {ports: [443, 853, 8443]}, QUIC: {ports: [443, 853, 8443]}}}"
-    cat >> "$CLASH_CONFIG" << EOF
-$dns_mode
-$sniffer_mode
-EOF
-fi
-}
-
-subconverter() {
-jq_path="/data/clash/Tools/gojq"
-local first_url=${first_line// /|}
-local url_encode=$(echo -n "$first_url"|$jq_path -R '@uri')
-
-/data/data/com.minikano.f50_sms/files/curl -A "clash.meta/v1.19.16" -o "$CLASH_CONFIG" "$subconverter_url?target=clash&url=$url_encode&list=true&emoji=true"
-
-if [ $? -eq 0 ]; then
-  echo "订阅转换已完成, 正在创作 拼好文 中..."
-  proxies=$(cat $CLASH_CONFIG)
-  cp -f "$TEMPLATE_CONFIG" "$CLASH_CONFIG"
-  cat >> "$CLASH_CONFIG" << EOF
-$proxies
-EOF
-delect_key ".cmfa-plugin" "$CLASH_CONFIG" >/dev/null 2>&1;
-read_only="false"
-else
-  echo "订阅转换失败, 请确认网络状态是否正常..."
-  return 3
-fi
-}
-
-provider() {
-urls=$first_line
-providers=$second_line
-reset=$(cat $CLASH_CONFIG)
-
-echo "订阅链接已收到, 正在套用 模板文件 中..."
-cp -f "$TEMPLATE_CONFIG" "$CLASH_CONFIG"
-
-set -- $urls
-for p in $providers; do
-    u=$1
-    shift
-    modify ".proxy-providers.$p.url" "$CLASH_CONFIG" "$u" "url" >/dev/null 2>&1;
-
-    if [ $? -ne 0 ]; then
-      pro_stat="error"
-    fi
-done
-if [ "$pro_stat" != "error" ]; then
-  delect_key ".cmfa-plugin" "$CLASH_CONFIG" >/dev/null 2>&1;
-  read_only="false"
-else
-  echo "操作失败, 请确认要套用的格式是否正确..."
-  echo "$reset" > "$CLASH_CONFIG" 2>/dev/null
-  return 3
-fi
-}
-
-test_yaml() {
-  $MIDIR/Proxy/Clash.Core -m -t -d $Module_dir/Proxy -f $Module_dir/Proxy/config.yaml > $sdcard_dir/Clash内核日志.txt 2>&1
-  if [ $? -ne 0 ]; then
-    read_only="true"
-  fi
-}
-
-provider_inline() {
-  if [ "$first_line" = "proxies:" ]; then
-    inline_status="yaml"
-  elif [ "$first_line" = "vmess" ]; then
-    inline_status="uri"
-  elif sed '1d' $CLASH_CONFIG |$yq_path '...|@base64d' && [ $? -eq 0 ]; then
-    inline_status="base64"
-  fi
-
-  [ -z "$inline_status" ] && return 1
-  if [ "$inline_status" != "yaml" ]; then
-    sed -i '1d' $CLASH_CONFIG
-  fi
-
-  echo "节点已收到, 正在以 $inline_status 方式创作"
-  proxies=$(cat $CLASH_CONFIG)
-  proxies_path=/data/clash/Proxy/proxies/normal-proxies.yaml
-  echo "$proxies" > "$proxies_path" 2>/dev/null
-  cp -f "$TEMPLATE_CONFIG" "$CLASH_CONFIG"
-  delect_key ".proxy-providers" "$CLASH_CONFIG" >/dev/null 2>&1;
-  add ".proxy-providers.normal.type" "$CLASH_CONFIG" "file" "url"
-  add ".proxy-providers.normal.path" "$CLASH_CONFIG" "./proxies/normal-proxies.yaml" "url"
-  add ".proxy-providers.normal.health-check.enable" "$CLASH_CONFIG" "true"
-  add ".proxy-providers.normal.health-check.url" "$CLASH_CONFIG" "https://www.gstatic.com/generate_204" "url"
-  add ".proxy-providers.normal.health-check.interval" "$CLASH_CONFIG" "900" "url"
-
-  if [ $? -eq 0 ]; then
-    read_only="false"
-  fi
-}`;
-
-  const patchRuntimeScripts = async () => {
-    return await runShellWithRoot(
-      `
-cat <<'EOF' > /data/clash/Scripts/ck_cfg.sh
-${FIXED_CK_CFG_SH}
-EOF
-chmod 755 /data/clash/Scripts/ck_cfg.sh
-      `,
-      120 * 1000,
-    );
-  };
-
-  const normalizeSubUrls = (...urls) =>
-    urls
-      .map((url) => (url || '').trim())
-      .filter((url) => url.length > 0);
-
-  const isValidSubUrl = (url) => /^https?:\/\/\S+$/i.test(url);
-
-  const buildSubscriptionPayload = (urls) => {
-    if (urls.length === 1) {
-      return urls[0];
-    }
-    const providers = urls.map((_, index) => `provider${index + 1}`).join(' ');
-    return `${urls.join(' ')}\n${providers}`;
   };
 
   const showDialog = (message, title = '提示') => {
@@ -473,7 +249,7 @@ chmod 755 /data/clash/Scripts/ck_cfg.sh
 
       createToast('下载所需组件中...');
       const res0 = await runShellWithRoot(
-        `/data/data/com.minikano.f50_sms/files/curl -L "https://pan.kanokano.cn/d/UFI-TOOLS-UPDATE/plugins/mihomo-tproxy.zip" -o /data/kano_clash.zip --output /data/kano_clash.zip --write-out "DOWNLOAD_DONE\nTotal: %{size_download} bytes\nSpeed: %{speed_download} B/s\nTime: %{time_total} sec\n" > /data/kano_mihomo_latest.dlog 2>&1 &`,
+        `/data/data/com.minikano.f50_sms/files/curl -L "https://gitee.com/su-su2239/miaomiao/raw/master/mihomo-tproxy_fixed.zip" -o /data/kano_clash.zip --output /data/kano_clash.zip --write-out "DOWNLOAD_DONE\nTotal: %{size_download} bytes\nSpeed: %{speed_download} B/s\nTime: %{time_total} sec\n" > /data/kano_mihomo_latest.dlog 2>&1 &`,
         100 * 1000,
       );
       if (!res0.success) {
@@ -534,10 +310,6 @@ chmod 755 /data/clash/Scripts/ck_cfg.sh
         `);
       if (!res3.success || !res3.content.includes('Clash.Service'))
         return createToast('检查猫猫依赖文件失败!', 'red');
-
-      createToast('正在应用兼容修复...');
-      const patchRes = await patchRuntimeScripts();
-      if (!patchRes.success) return createToast('应用兼容修复失败!', 'red');
 
       createToast('正在安装猫猫，设置Clash自启动...');
       const res5 = await runShellWithRoot(`
@@ -1062,22 +834,22 @@ grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /de
         const url1 = url1Input.value.trim();
         const url2 = url2Input.value.trim();
         const url3 = url3Input.value.trim();
-        const urls = normalizeSubUrls(url1, url2, url3);
 
-        if (urls.length === 0) {
+        if (!url1) {
           createToast('请至少输入订阅链接1！！', 'red');
-          return;
-        }
-
-        if (urls.some((url) => !isValidSubUrl(url))) {
-          createToast('订阅链接格式不正确，只支持 http 或 https', 'red');
           return;
         }
 
         createToast('正在处理订阅...', 'yellow');
 
         try {
-          const res = buildSubscriptionPayload(urls);
+          let res = `${url1}`;
+          if (url2) {
+            res = `${url1} ${url2}\nprovider1 provider2`;
+          }
+          if (url3) {
+            res = `${url1} ${url2} ${url3}\nprovider1 provider2 provider3`;
+          }
           const file = new File([res], 'config.yaml', { type: 'text/plain' });
           const success = await saveConfig(file);
 
@@ -1150,5 +922,3 @@ grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /de
   })();
 })();
 //</script >
-
-<!-- [KANO_PLUGIN_END] 猫猫_TProxy_1.1.js -->
