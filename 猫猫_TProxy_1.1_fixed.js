@@ -232,6 +232,251 @@
     }
   };
 
+  const KANO_PACKAGE_PATH = '/data/kano_clash.zip';
+  const KANO_PACKAGE_LOG_PATH = '/data/kano_mihomo_latest.dlog';
+
+  const cleanupInstallCache = async () => {
+    await runShellWithRoot(
+      `rm -f ${KANO_PACKAGE_PATH} ${KANO_PACKAGE_LOG_PATH}`,
+    );
+  };
+
+  const chooseInstallMode = () =>
+    new Promise((resolve) => {
+      const containerId = 'install_mode_' + createRandomString(4);
+      const idOnline = 'install_online_' + createRandomString(4);
+      const idLocal = 'install_local_' + createRandomString(4);
+      const idCancel = 'install_cancel_' + createRandomString(4);
+      const { el, close } = createFixedToast(
+        containerId,
+        `
+        <div style="pointer-events:all;width:320px;text-align:center">
+          <div class="title" style="margin:0 0 10px 0">选择安装方式</div>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+            <button id="${idLocal}">本地安装</button>
+            <button id="${idOnline}">在线安装</button>
+            <button id="${idCancel}">取消</button>
+          </div>
+        </div>
+        `,
+      );
+
+      const finish = (mode) => {
+        close();
+        resolve(mode);
+      };
+
+      el.querySelector(`#${idLocal}`).onclick = () => finish('local');
+      el.querySelector(`#${idOnline}`).onclick = () => finish('online');
+      el.querySelector(`#${idCancel}`).onclick = () => finish('');
+    });
+
+  const installPackageInput = document.createElement('input');
+  installPackageInput.type = 'file';
+  installPackageInput.accept = '.zip,application/zip';
+  installPackageInput.style.display = 'none';
+
+  const uploadLocalPackage = () =>
+    new Promise((resolve) => {
+      installPackageInput.value = '';
+      installPackageInput.onchange = async (e) => {
+        try {
+          if (!e.target || !e.target.files || e.target.files.length === 0) {
+            return resolve(false);
+          }
+          const file = e.target.files[0];
+          if (!file) return resolve(false);
+          if (!file.name.toLowerCase().endsWith('.zip')) {
+            createToast('只能选择 zip 安装包！', 'red');
+            return resolve(false);
+          }
+
+          createToast('上传本地安装包中...');
+          const formData = new FormData();
+          formData.append('file', file);
+          const res = await (
+            await fetch(`${KANO_baseURL}/upload_img`, {
+              method: 'POST',
+              headers: common_headers,
+              body: formData,
+            })
+          ).json();
+
+          if (!res.url) {
+            createToast(res.error || '上传本地安装包失败!', 'red');
+            return resolve(false);
+          }
+
+          const resShell = await runShellWithRoot(`
+            mv /data/data/com.minikano.f50_sms/files/${res.url} ${KANO_PACKAGE_PATH}
+          `);
+          if (!resShell.success) {
+            createToast('移动本地安装包失败!', 'red');
+            return resolve(false);
+          }
+
+          resolve(true);
+        } catch (e1) {
+          console.error(e1);
+          createToast('上传本地安装包失败!', 'red');
+          resolve(false);
+        }
+      };
+      installPackageInput.click();
+    });
+
+  const downloadOnlinePackage = async () => {
+    createToast('下载所需组件中...');
+    const res0 = await runShellWithRoot(
+      `/data/data/com.minikano.f50_sms/files/curl -L "https://gitee.com/su-su2239/miaomiao/raw/master/mihomo-tproxy_fixed.zip" -o ${KANO_PACKAGE_PATH} --output ${KANO_PACKAGE_PATH} --write-out "DOWNLOAD_DONE\nTotal: %{size_download} bytes\nSpeed: %{speed_download} B/s\nTime: %{time_total} sec\n" > ${KANO_PACKAGE_LOG_PATH} 2>&1 &`,
+      100 * 1000,
+    );
+    if (!res0.success) {
+      createToast('在线下载安装失败!', 'red');
+      return false;
+    }
+
+    let log = '';
+    const max_times = 600;
+    let count_times = 0;
+    const { el, close } = createFixedToast(
+      'kano_mihomo_toast',
+      `<pre style="white-space: pre-wrap;min-width:300px;text-align: center;">等待日志中...</pre>`,
+      '',
+    );
+
+    const interval = setInterval(async () => {
+      const dlog = await runShellWithRoot(
+        `timeout 2s awk '{print}' ${KANO_PACKAGE_LOG_PATH}`,
+      );
+      const lines = (dlog.content || '').split('\n');
+      log = lines.slice(-6).join('\n');
+      el.innerHTML = `<pre style="white-space: pre-wrap;min-width:300px;text-align: center;">${log.replaceAll('\n', '<br>')}</pre>`;
+      if (log.includes('DOWNLOAD_DONE')) {
+        setTimeout(() => {
+          close();
+        }, 2000);
+      }
+    }, 1000);
+
+    while (true) {
+      if (max_times <= count_times) {
+        clearInterval(interval);
+        createToast('在线下载超时，请检查网络或稍后重试！', 'red');
+        return false;
+      }
+      if (log.includes('DOWNLOAD_DONE')) {
+        clearInterval(interval);
+        break;
+      }
+      count_times++;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    return true;
+  };
+
+  const installFromPreparedPackage = async () => {
+    createToast('解压猫猫文件...');
+    // 打包规则见《压缩包打包说明.md》
+    const res2 = await runShellWithRoot(`
+      cd /data/
+      mkdir -p clash
+      unzip -o kano_clash.zip -d /data/clash/
+      if [ ! -f /data/clash/Scripts/Clash.Service ]; then
+        for ENTRY_PATH in /data/clash/*; do
+          [ -e "$ENTRY_PATH" ] || continue
+          ENTRY_NAME="\${ENTRY_PATH#/data/clash/}"
+          FIXED_NAME=$(printf '%s' "$ENTRY_NAME" | sed 's#\\\\#/#g' | sed 's#/$##')
+          if [ "$ENTRY_NAME" != "$FIXED_NAME" ]; then
+            mkdir -p "/data/clash/$(dirname "$FIXED_NAME")"
+            rm -rf "/data/clash/$FIXED_NAME"
+            mv "$ENTRY_PATH" "/data/clash/$FIXED_NAME"
+          fi
+        done
+      fi
+      ROOT_DIR="/data/clash"
+      if [ ! -f /data/clash/Scripts/Clash.Service ]; then
+        FOUND_SERVICE=$(find /data/clash -type f -name Clash.Service 2>/dev/null | head -n 1)
+        if [ -n "$FOUND_SERVICE" ]; then
+          ROOT_DIR=$(dirname "$(dirname "$FOUND_SERVICE")")
+          for d in Scripts Proxy Tools; do
+            if [ -d "$ROOT_DIR/$d" ] && [ "$ROOT_DIR/$d" != "/data/clash/$d" ]; then
+              rm -rf "/data/clash/$d"
+              mv "$ROOT_DIR/$d" /data/clash/
+            fi
+          done
+        fi
+      fi
+      `);
+    if (!res2.success) {
+      createToast('解压猫猫文件出错!', 'red');
+      return false;
+    }
+
+    createToast('检查依赖文件，可能需要一点时间...');
+    const res3 = await runShellWithRoot(`
+      test -f /data/clash/Scripts/Clash.Service &&
+      test -f /data/clash/Proxy/Clash.Core &&
+      test -f /data/clash/Tools/yq_linux_arm64 &&
+      echo INSTALL_LAYOUT_OK
+      `);
+    if (!res3.success || !res3.content.includes('INSTALL_LAYOUT_OK')) {
+      createToast('检查猫猫依赖文件失败!', 'red');
+      return false;
+    }
+
+    createToast('正在安装猫猫，设置Clash自启动...');
+    const res5 = await runShellWithRoot(`
+chmod 777 -Rf /data/clash
+grep -qxF '/data/clash/Scripts/Clash.Service start' /sdcard/ufi_tools_boot.sh || echo '/data/clash/Scripts/Clash.Service start' >> /sdcard/ufi_tools_boot.sh
+grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /dev/null &' /sdcard/ufi_tools_boot.sh || echo 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /dev/null &' >> /sdcard/ufi_tools_boot.sh
+    `);
+    if (!res5.success) {
+      createToast('设置猫猫自启动失败!', 'red');
+      return false;
+    }
+
+    createToast('启动Clash...');
+    const res6 = await runShellWithRoot(`
+      /data/clash/Scripts/Clash.Service start
+      `);
+    if (!res6.success) {
+      createToast('启动猫猫失败!', 'red');
+      return false;
+    }
+
+    createToast(
+      `<div style="width:300px;text-align:center;pointer-events: all;">
+              启动Clash成功！<br />
+              web地址(端口默认是7788)<br />
+              <a href="${getDashboardUrl()}" target="_blank">${getDashboardUrl()}</a><br />
+              后台已免密，页面会强制使用当前设备地址连接<br />
+              可导出默认配置，然后修改好上传配置<br />
+              依赖文件路径:/data/clash/<br/>
+              内核日志:sdcard/Clash内核日志.txt<br/>
+              输出:${res6.content}
+      </div>
+      `,
+      '',
+      20000,
+    );
+
+    checkIsBootUp().then((isBootUp) => {
+      const boot_on = document.querySelector('#clash_boot_on');
+      if (!boot_on) return;
+      if (isBootUp) {
+        boot_on.style.background = 'var(--dark-btn-color-active)';
+      } else {
+        boot_on.style.background = '';
+      }
+    });
+    setTimeout(() => {
+      isMMRunning();
+    }, 3000);
+    return true;
+  };
+
   const btn_enabled = document.createElement('button');
   btn_enabled.textContent = '安装';
   let disabled_btn_enabled = false;
@@ -249,147 +494,22 @@
         createToast('已经安装过猫猫了！', 'red');
         return;
       }
+      await cleanupInstallCache();
+      const mode = await chooseInstallMode();
+      if (!mode) return;
 
-      createToast('下载所需组件中...');
-      const res0 = await runShellWithRoot(
-        `/data/data/com.minikano.f50_sms/files/curl -L "https://gitee.com/su-su2239/miaomiao/raw/master/mihomo-tproxy_fixed.zip" -o /data/kano_clash.zip --output /data/kano_clash.zip --write-out "DOWNLOAD_DONE\nTotal: %{size_download} bytes\nSpeed: %{speed_download} B/s\nTime: %{time_total} sec\n" > /data/kano_mihomo_latest.dlog 2>&1 &`,
-        100 * 1000,
-      );
-      if (!res0.success) {
-        btn_enabled.disabled = false;
-        return createToast('下载依赖失败!', 'red');
+      let prepared = false;
+      if (mode === 'local') {
+        prepared = await uploadLocalPackage();
+      } else {
+        prepared = await downloadOnlinePackage();
       }
+      if (!prepared) return;
 
-      let log = '';
-      const max_times = 600; // 最多等待10分钟
-      let count_times = 0;
-      const { el, close } = createFixedToast(
-        'kano_mihomo_toast',
-        `<pre style="white-space: pre-wrap;min-width:300px;text-align: center;">等待日志中...</pre>`,
-        '',
-      );
-
-      const interval = setInterval(async () => {
-        const dlog = await runShellWithRoot(
-          "timeout 2s  awk '{print}' /data/kano_mihomo_latest.dlog",
-        );
-        const lines = dlog.content.split('\n'); // 按换行符拆分成数组
-        log = lines.slice(-6).join('\n');
-        el.innerHTML = `<pre style="white-space: pre-wrap;min-width:300px;text-align: center;">${log.replaceAll('\n', '<br>')}</pre>`;
-        if (log.includes('DOWNLOAD_DONE')) {
-          setTimeout(() => {
-            close();
-          }, 2000);
-        }
-      }, 1000);
-
-      while (true) {
-        if (max_times <= count_times) {
-          clearInterval(interval);
-          btn_enabled.disabled = false;
-          return ('下载超时，请检查网络连接或稍后重试！', 'red');
-        }
-        if (log.includes('DOWNLOAD_DONE')) {
-          clearInterval(interval);
-          break;
-        }
-        count_times++;
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-
-      await runShellWithRoot('rm -f /data/kano_mihomo_latest.dlog');
-
-      createToast('解压猫猫文件...');
-      // 打包规则见《压缩包打包说明.md》
-      const res2 = await runShellWithRoot(`
-        cd /data/
-        mkdir -p clash
-        unzip -o kano_clash.zip -d /data/clash/
-        if [ ! -f /data/clash/Scripts/Clash.Service ]; then
-          for ENTRY_PATH in /data/clash/*; do
-            [ -e "$ENTRY_PATH" ] || continue
-            ENTRY_NAME="\${ENTRY_PATH#/data/clash/}"
-            FIXED_NAME=$(printf '%s' "$ENTRY_NAME" | sed 's#\\\\#/#g' | sed 's#/$##')
-            if [ "$ENTRY_NAME" != "$FIXED_NAME" ]; then
-              mkdir -p "/data/clash/$(dirname "$FIXED_NAME")"
-              rm -rf "/data/clash/$FIXED_NAME"
-              mv "$ENTRY_PATH" "/data/clash/$FIXED_NAME"
-            fi
-          done
-        fi
-        ROOT_DIR="/data/clash"
-        if [ ! -f /data/clash/Scripts/Clash.Service ]; then
-          FOUND_SERVICE=$(find /data/clash -type f -name Clash.Service 2>/dev/null | head -n 1)
-          if [ -n "$FOUND_SERVICE" ]; then
-            ROOT_DIR=$(dirname "$(dirname "$FOUND_SERVICE")")
-            for d in Scripts Proxy Tools; do
-              if [ -d "$ROOT_DIR/$d" ] && [ "$ROOT_DIR/$d" != "/data/clash/$d" ]; then
-                rm -rf "/data/clash/$d"
-                mv "$ROOT_DIR/$d" /data/clash/
-              fi
-            done
-          fi
-        fi
-        `);
-      if (!res2.success) return createToast('解压猫猫文件出错!', 'red');
-
-      createToast('检查依赖文件，可能需要一点时间...');
-      const res3 = await runShellWithRoot(`
-        test -f /data/clash/Scripts/Clash.Service
-        test -f /data/clash/Proxy/Clash.Core
-        test -f /data/clash/Tools/yq_linux_arm64
-        echo INSTALL_LAYOUT_OK
-        `);
-      if (!res3.success || !res3.content.includes('INSTALL_LAYOUT_OK'))
-        return createToast('检查猫猫依赖文件失败!', 'red');
-
-      createToast('正在安装猫猫，设置Clash自启动...');
-      const res5 = await runShellWithRoot(`
-chmod 777 -Rf /data/clash
-grep -qxF '/data/clash/Scripts/Clash.Service start' /sdcard/ufi_tools_boot.sh || echo '/data/clash/Scripts/Clash.Service start' >> /sdcard/ufi_tools_boot.sh
-grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /dev/null &' /sdcard/ufi_tools_boot.sh || echo 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /dev/null &' >> /sdcard/ufi_tools_boot.sh
-        `);
-      if (!res5.success) return createToast('设置猫猫自启动失败!', 'red');
-
-      createToast('启动Clash...');
-      const res6 = await runShellWithRoot(`
-        /data/clash/Scripts/Clash.Service start
-        `);
-      if (!res6.success) return createToast('启动猫猫失败!', 'red');
-
-      createToast(
-        `<div style="width:300px;text-align:center;pointer-events: all;">
-                启动Clash成功！<br />
-                web地址(端口默认是7788)<br />
-                <a href="${getDashboardUrl()}" target="_blank">${getDashboardUrl()}</a><br />
-                后台已免密，页面会强制使用当前设备地址连接<br />
-                可导出默认配置，然后修改好上传配置<br />
-                依赖文件路径:/data/clash/<br/>
-                内核日志:sdcard/Clash内核日志.txt<br/>
-                输出:${res6.content}
-        </div>
-        `,
-        '',
-        20000,
-      );
-
-      disabled_btn_enabled = false;
-
-      checkIsBootUp().then((isBootUp) => {
-        const boot_on = document.querySelector('#clash_boot_on');
-        if (!boot_on) return;
-        if (isBootUp) {
-          boot_on.style.background = 'var(--dark-btn-color-active)';
-        } else {
-          boot_on.style.background = '';
-        }
-      });
-      setTimeout(() => {
-        isMMRunning();
-      }, 3000);
+      await installFromPreparedPackage();
     } finally {
       disabled_btn_enabled = false;
-      await runShellWithRoot(`rm -f /data/kano_clash.zip`);
+      await cleanupInstallCache();
     }
   };
   const btn_disabled = document.createElement('button');
@@ -911,6 +1031,7 @@ grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /de
     };
 
     const mmBox = document.querySelector('#mm_action_box');
+    mmBox.appendChild(installPackageInput);
     mmBox.appendChild(uploadCoreInput);
     mmBox.appendChild(editBtn);
     mmBox.appendChild(subBtn); // 订阅链接
