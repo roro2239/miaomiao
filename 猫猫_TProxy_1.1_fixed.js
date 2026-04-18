@@ -303,15 +303,43 @@
       const res2 = await runShellWithRoot(`
         cd /data/
         mkdir -p clash
-        unzip kano_clash.zip -d /data/clash/
+        unzip -o kano_clash.zip -d /data/clash/
+        if [ ! -f /data/clash/Scripts/Clash.Service ]; then
+          for ENTRY_PATH in /data/clash/*; do
+            [ -e "$ENTRY_PATH" ] || continue
+            ENTRY_NAME="${ENTRY_PATH#/data/clash/}"
+            FIXED_NAME=$(printf '%s' "$ENTRY_NAME" | sed 's#\\\\#/#g' | sed 's#/$##')
+            if [ "$ENTRY_NAME" != "$FIXED_NAME" ]; then
+              mkdir -p "/data/clash/$(dirname "$FIXED_NAME")"
+              rm -rf "/data/clash/$FIXED_NAME"
+              mv "$ENTRY_PATH" "/data/clash/$FIXED_NAME"
+            fi
+          done
+        fi
+        ROOT_DIR="/data/clash"
+        if [ ! -f /data/clash/Scripts/Clash.Service ]; then
+          FOUND_SERVICE=$(find /data/clash -type f -name Clash.Service 2>/dev/null | head -n 1)
+          if [ -n "$FOUND_SERVICE" ]; then
+            ROOT_DIR=$(dirname "$(dirname "$FOUND_SERVICE")")
+            for d in Scripts Proxy Tools; do
+              if [ -d "$ROOT_DIR/$d" ] && [ "$ROOT_DIR/$d" != "/data/clash/$d" ]; then
+                rm -rf "/data/clash/$d"
+                mv "$ROOT_DIR/$d" /data/clash/
+              fi
+            done
+          fi
+        fi
         `);
       if (!res2.success) return createToast('解压猫猫文件出错!', 'red');
 
       createToast('检查依赖文件，可能需要一点时间...');
       const res3 = await runShellWithRoot(`
-        ls /data/clash/Scripts
+        test -f /data/clash/Scripts/Clash.Service
+        test -f /data/clash/Proxy/Clash.Core
+        test -f /data/clash/Tools/yq_linux_arm64
+        echo INSTALL_LAYOUT_OK
         `);
-      if (!res3.success || !res3.content.includes('Clash.Service'))
+      if (!res3.success || !res3.content.includes('INSTALL_LAYOUT_OK'))
         return createToast('检查猫猫依赖文件失败!', 'red');
 
       createToast('正在安装猫猫，设置Clash自启动...');
