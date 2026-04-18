@@ -10,6 +10,9 @@
     return false;
   };
 
+  const getDashboardUrl = () =>
+    `http://${UFI_DATA.lan_ipaddr}:7788/ui/?host=${UFI_DATA.lan_ipaddr}&port=7788&secret=&t=${Date.now()}#/proxies`;
+
   //创建随机数
   const createRandomString = (length = 8) => {
     const characters =
@@ -329,8 +332,8 @@ grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /de
         `<div style="width:300px;text-align:center;pointer-events: all;">
                 启动Clash成功！<br />
                 web地址(端口默认是7788)<br />
-                <a href="http://192.168.0.1:7788/ui/" target="_blank">http://192.168.0.1:7788/ui/</a><br />
-                token密码默认为123456<br />
+                <a href="${getDashboardUrl()}" target="_blank">${getDashboardUrl()}</a><br />
+                后台已免密，页面会强制使用当前设备地址连接<br />
                 可导出默认配置，然后修改好上传配置<br />
                 依赖文件路径:/data/clash/<br/>
                 内核日志:sdcard/Clash内核日志.txt<br/>
@@ -624,8 +627,7 @@ grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /de
     refresh.classList.add('btn');
     refresh.textContent = '刷新网页';
     refresh.onclick = () => {
-      document.getElementById('mm_iframe').src =
-        `http://${UFI_DATA.lan_ipaddr}:7788/ui/?t=` + Date.now();
+      document.getElementById('mm_iframe').src = getDashboardUrl();
     };
 
     const open = document.createElement('button');
@@ -633,7 +635,7 @@ grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /de
     open.textContent = '打开面板';
     open.onclick = () => {
       const a = document.createElement('a');
-      a.href = `http://${UFI_DATA.lan_ipaddr}:7788/ui/?t=` + Date.now();
+      a.href = getDashboardUrl();
       a.target = '_blank';
       a.style.display = 'none';
       document.body.appendChild(a);
