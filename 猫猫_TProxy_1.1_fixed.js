@@ -308,7 +308,7 @@
         if [ ! -f /data/clash/Scripts/Clash.Service ]; then
           for ENTRY_PATH in /data/clash/*; do
             [ -e "$ENTRY_PATH" ] || continue
-            ENTRY_NAME="${ENTRY_PATH#/data/clash/}"
+            ENTRY_NAME="\${ENTRY_PATH#/data/clash/}"
             FIXED_NAME=$(printf '%s' "$ENTRY_NAME" | sed 's#\\\\#/#g' | sed 's#/$##')
             if [ "$ENTRY_NAME" != "$FIXED_NAME" ]; then
               mkdir -p "/data/clash/$(dirname "$FIXED_NAME")"
