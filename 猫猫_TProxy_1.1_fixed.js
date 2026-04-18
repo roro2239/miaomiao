@@ -11,7 +11,9 @@
   };
 
   const getDashboardUrl = () =>
-    `http://${UFI_DATA.lan_ipaddr}:7788/ui/?host=${UFI_DATA.lan_ipaddr}&port=7788&secret=&t=${Date.now()}#/proxies`;
+    `http://${UFI_DATA.lan_ipaddr}:7788/ui/?host=${UFI_DATA.lan_ipaddr}&hostname=${UFI_DATA.lan_ipaddr}&port=7788&secret=&t=${Date.now()}#/proxies`;
+
+  const DASHBOARD_OPTIONS = ['dashboard', 'metacubexd', 'zashboard'];
 
   //创建随机数
   const createRandomString = (length = 8) => {
@@ -578,6 +580,81 @@ grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /de
     await isMMRunning();
   };
 
+  const chooseDashboard = () =>
+    new Promise((resolve) => {
+      const containerId = 'dashboard_mode_' + createRandomString(4);
+      const idCancel = 'dashboard_cancel_' + createRandomString(4);
+      const ids = DASHBOARD_OPTIONS.map((name) => ({
+        name,
+        id: `dashboard_${name}_${createRandomString(4)}`,
+      }));
+      const { el, close } = createFixedToast(
+        containerId,
+        `
+        <div style="pointer-events:all;width:360px;text-align:center">
+          <div class="title" style="margin:0 0 10px 0">选择内置面板</div>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+            ${ids.map((item) => `<button id="${item.id}">${item.name}</button>`).join('')}
+            <button id="${idCancel}">取消</button>
+          </div>
+        </div>
+        `,
+      );
+
+      const finish = (name) => {
+        close();
+        resolve(name);
+      };
+
+      for (const item of ids) {
+        el.querySelector(`#${item.id}`).onclick = () => finish(item.name);
+      }
+      el.querySelector(`#${idCancel}`).onclick = () => finish('');
+    });
+
+  const switchDashboardBtn = document.createElement('button');
+  switchDashboardBtn.textContent = '切换面板';
+  switchDashboardBtn.onclick = async () => {
+    if (!(await checkAdvanceFunc())) {
+      createToast('没有开启高级功能，无法使用！', 'red');
+      return;
+    }
+    if (!(await checkIsInstalled())) {
+      createToast('没有安装猫猫，请先安装！', 'red');
+      return;
+    }
+    const dashboard = await chooseDashboard();
+    if (!dashboard) return;
+    createToast(`正在切换到 ${dashboard}...`, 'green');
+    const res = await runShellWithRoot(
+      `
+        DASHBOARD="${dashboard}"
+        case "$DASHBOARD" in
+          dashboard|metacubexd|zashboard) ;;
+          *) exit 2 ;;
+        esac
+        CONFIG=/data/clash/Proxy/config.yaml
+        YQ=/data/clash/Tools/yq_linux_arm64
+        [ -f "$CONFIG" ] || exit 3
+        [ -f "$YQ" ] || exit 4
+        "$YQ" e '."external-ui" = "WebUI/'"$DASHBOARD"'" | ."cmfa-plugin".dashboard = "'"$DASHBOARD"'" | del(."external-ui-url")' -i "$CONFIG"
+        rm -f /data/clash/Scripts/fast_sha256
+        /data/clash/Scripts/Clash.Service stop
+        sleep 1
+        /data/clash/Scripts/Clash.Service start
+      `,
+      100 * 1000,
+    );
+    if (!res.success) {
+      createToast('切换面板失败！', 'red');
+      return;
+    }
+    createToast(`已切换到 ${dashboard}`, 'green');
+    const iframe = document.getElementById('mm_iframe');
+    if (iframe) iframe.src = getDashboardUrl();
+    await isMMRunning();
+  };
+
   //一键上传
   const uploadEl = document.createElement('input');
   uploadEl.type = 'file';
@@ -1042,6 +1119,7 @@ grep -qxF 'inotifyd /data/clash/Scripts/Clash.Inotify "/data/clash/Clash" >> /de
     mmBox.appendChild(btn_restart);
     mmBox.appendChild(btn_disabled);
     mmBox.appendChild(boot_on);
+    mmBox.appendChild(switchDashboardBtn);
     mmBox.appendChild(open);
     mmBox.appendChild(uploadCore);
     mmBox.appendChild(wiki);
