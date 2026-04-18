@@ -300,6 +300,7 @@
       await runShellWithRoot('rm -f /data/kano_mihomo_latest.dlog');
 
       createToast('解压猫猫文件...');
+      // 打包规则见《压缩包打包说明.md》
       const res2 = await runShellWithRoot(`
         cd /data/
         mkdir -p clash
